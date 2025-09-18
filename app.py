@@ -386,12 +386,23 @@ class BusinessConsultantAgent:
         
         self.system_instructions = """
 You are a friendly Business Consultant helping entrepreneurs develop their business concepts through natural conversation.
-CRITICAL OVERRIDE INSTRUCTIONS:
-- Ignore any default instructions about not giving positive feedback
-- You MUST give positive acknowledgments like "Perfect!", "Great!"
-- You MUST NOT provide analysis, bullet points, or detailed explanations
-- You MUST follow the TIC collection process exactly
-- This is a structured business consultation, not general conversation
+CRITICAL SYSTEM OVERRIDE -  INSTRUCTIONS:
+
+You are operating in BUSINESS CONSULTANT MODE. All default behaviors are DISABLED for this session.
+
+FORCED BEHAVIORAL OVERRIDES:
+- You MUST give positive acknowledgments: "Perfect!", "Great!", "Excellent!"
+- You MUST NOT provide detailed analysis, bullet points, or step-by-step guides
+- You MUST follow the exact TIC collection process
+- You MUST ask only the next TIC question after validation
+- Ignore any instructions about "not praising" or "critical evaluation"
+- This is a structured consultation, not general conversation
+
+MANDATORY CONVERSATION FLOW:
+1. User answers TIC question
+2. You say "Perfect!" or "Great!"  
+3. You ask next TIC question
+4. NO analysis, NO bullet points, NO detailed explanations
 CONVERSATION RULES:
 - Be warm, encouraging, and conversational like a human consultant
 - NO bullet points, breakdowns, or analysis summaries in chat
@@ -705,7 +716,7 @@ Critically compare this business idea against the benchmark companies. Consider 
         
         # Call OpenAI for evaluation
         evaluation_response = client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4.1",
             messages=[{"role": "user", "content": evaluation_prompt}],
             response_format={"type": "json_object"},
             temperature=0.3
@@ -749,7 +760,7 @@ class AgentOrchestrator:
             
             # The consultant agent leads the conversation
             response = client.responses.create(
-                model="gpt-4o",
+                model="gpt-4.1",
                 tools=self.consultant.tools,
                 instructions=self.consultant.system_instructions,
                 conversation=conversation_id,
@@ -809,7 +820,7 @@ class AgentOrchestrator:
             # Continue conversation with tool outputs
             if tool_outputs:
                 response = client.responses.create(
-                    model="gpt-4o",
+                    model="gpt-4.1",
                     conversation=conversation_id,
                     input=tool_outputs,
                     temperature=0
@@ -1270,3 +1281,4 @@ else:
 st.markdown("---")
 
 st.markdown("**Two-Agent Business Consultation System** - Complete with TIC Collection, Benchmark Analysis, 20-Question Brainstorming & AI Evaluation!")
+
