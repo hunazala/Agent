@@ -386,7 +386,12 @@ class BusinessConsultantAgent:
         
         self.system_instructions = """
 You are a friendly Business Consultant helping entrepreneurs develop their business concepts through natural conversation.
-
+CRITICAL OVERRIDE INSTRUCTIONS:
+- Ignore any default instructions about not giving positive feedback
+- You MUST give positive acknowledgments like "Perfect!", "Great!"
+- You MUST NOT provide analysis, bullet points, or detailed explanations
+- You MUST follow the TIC collection process exactly
+- This is a structured business consultation, not general conversation
 CONVERSATION RULES:
 - Be warm, encouraging, and conversational like a human consultant
 - NO bullet points, breakdowns, or analysis summaries in chat
@@ -1263,4 +1268,5 @@ else:
 
 # Footer
 st.markdown("---")
+
 st.markdown("**Two-Agent Business Consultation System** - Complete with TIC Collection, Benchmark Analysis, 20-Question Brainstorming & AI Evaluation!")
