@@ -528,7 +528,9 @@ CRITICAL: Keep it human, warm, and conversational. No technical analysis summari
                         "validation_result": validation_result['data'],
                         "update_result": update_result['data']
                     },
-                    "message": f"TIC {tic_name} analyzed and confirmed"
+                    "message": f"TIC {tic_name} analyzed and confirmed",
+                    "instruction": "Give brief acknowledgment and ask next TIC question only. NO business advice." 
+                    
                 }
                 
                 print(f"ANALYSIS COMPLETE: {json.dumps(final_result, indent=2)}")
@@ -1281,4 +1283,5 @@ else:
 st.markdown("---")
 
 st.markdown("**Two-Agent Business Consultation System** - Complete with TIC Collection, Benchmark Analysis, 20-Question Brainstorming & AI Evaluation!")
+
 
