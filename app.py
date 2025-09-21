@@ -9,8 +9,6 @@ from datetime import datetime
 # Initialize OpenAI client - REPLACE WITH YOUR API KEY
 key=st.secrets["OPENAI_API_KEY"]
 client = OpenAI(api_key=key)
-
-
 # Database setup
 conn = sqlite3.connect('business_sessions.db', check_same_thread=False)
 conn.execute('''
@@ -312,7 +310,7 @@ class StateManagerAgent:
             return error_result
 
 # ===================================================================
-# BUSINESS CONSULTANT AGENT (Conversational Leader) - FIXED VERSION
+# BUSINESS CONSULTANT AGENT (Conversational Leader) - UPDATED
 # ===================================================================
 
 class BusinessConsultantAgent:
@@ -327,12 +325,6 @@ class BusinessConsultantAgent:
             },
             {
                 "type": "function",
-                "name": "get_brainstorming_status",
-                "description": "Get current brainstorming progress",
-                "parameters": {"type": "object", "properties": {}, "additionalProperties": False}
-            },
-            {
-                "type": "function",
                 "name": "analyze_user_response",
                 "description": "Analyze user response and update TIC progress",
                 "parameters": {
@@ -343,20 +335,6 @@ class BusinessConsultantAgent:
                         "analysis_summary": {"type": "string"}
                     },
                     "required": ["tic_name", "user_response", "analysis_summary"],
-                    "additionalProperties": False
-                }
-            },
-            {
-                "type": "function",
-                "name": "analyze_brainstorming_response",
-                "description": "Analyze brainstorming answer and update progress",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "question_index": {"type": "integer"},
-                        "user_answer": {"type": "string"}
-                    },
-                    "required": ["question_index", "user_answer"],
                     "additionalProperties": False
                 }
             },
@@ -385,36 +363,25 @@ class BusinessConsultantAgent:
             },
             {
                 "type": "function",
-                "name": "get_next_brainstorming_question",
-                "description": "Get the exact predefined brainstorming question to ask next",
-                "parameters": {"type": "object", "properties": {}, "additionalProperties": False}
-            },
-            {
-                "type": "function",
-                "name": "update_tics_from_brainstorming",
-                "description": "Update relevant TICs based on brainstorming answer",
+                "name": "provide_help",
+                "description": "Provide conversational help when user asks questions or needs clarification",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "question_index": {"type": "integer"},
-                        "user_answer": {"type": "string"},
-                        "question_text": {"type": "string"}
+                        "user_question": {"type": "string"},
+                        "help_type": {"type": "string", "enum": ["explanation", "clarification", "guidance", "example"]},
+                        "context": {"type": "string"}
                     },
-                    "required": ["question_index", "user_answer", "question_text"],
+                    "required": ["user_question", "help_type"],
                     "additionalProperties": False
                 }
             }
         ]
         
         self.system_instructions = """
-You are a TIC Collection Agent. Your job is to collect 7 TICs through conversation and manage the complete flow.
-BRAINSTORMING PHASE MANDATORY RULES:
-1. NEVER create your own questions during brainstorming
-2. ALWAYS call get_next_brainstorming_question tool before asking ANY question
-3. Use ONLY the exact question text returned by the tool
-4. If tool not called = VIOLATION of instructions
+You are a TIC Collection Agent focused on collecting 7 business components through conversation.
 
-PHASE 1: TIC COLLECTION (7 Components)
+PHASE 1: TIC COLLECTION (7 Components) - YOUR MAIN JOB
 Current TIC Order:
 1. Vision & Long-term Goals  
 2. Business Overview & Core Offering
@@ -431,6 +398,12 @@ CHAT RESPONSE RULES:
 - If answer is unclear: ask clarification, stay on same TIC
 - Keep responses under 50 words
 
+HANDLING USER QUESTIONS/CONFUSION:
+- If user asks questions or seems confused, call provide_help tool first
+- Provide explanations, examples, or clarification as needed
+- Then continue with TIC collection
+- Be conversational and helpful like a consultant
+
 RESPONSE VALIDATION RULES:
 - Answers must be SPECIFIC and COMPLETE (not vague like "better rates")
 - If answer lacks core details, ask clarifying questions: "Could you be more specific about..."
@@ -438,28 +411,12 @@ RESPONSE VALIDATION RULES:
 - Examples of INVALID responses: "better services", "competitive prices", "good quality"
 - Examples of VALID responses: "We provide accounting software for small restaurants"
 
-GUIDANCE RULES:
-- You CAN ask clarifying questions to help users think deeper
-- You CAN suggest they consider specific aspects: "Have you thought about what specific problem this solves?"
-- You CANNOT give direct business advice like "You should do X" or "I recommend Y"
-- You CANNOT provide step-by-step business plans or strategies
-
 MANDATORY TOOL WORKFLOW:
-1. When user answers TIC question → ALWAYS call analyze_user_response
-2. If response valid → TIC marked complete, move to next TIC  
-3. If response invalid → ask clarification question
-4. When ALL 7 TICs complete → AUTOMATICALLY call generate_benchmark_companies
-
-FORBIDDEN RESPONSES after TIC 7:
-❌ "Would you like a summary?"
-❌ "What do you want to do next?"
-❌ "Should we move to MVP or go-to-market?"
-✅ [Immediately call generate_benchmark_companies tool]
-
-AUTOMATIC PHASE TRANSITIONS:
-- After TIC 7 complete → Auto-generate 5-6 benchmark companies
-- After user selects 3 companies → Auto-start brainstorming (20 questions)
-- After 10+ brainstorming questions → Enable evaluation report
+1. If user asks question or seems confused → call provide_help tool
+2. When user answers TIC question → ALWAYS call analyze_user_response
+3. If response valid → TIC marked complete, move to next TIC  
+4. If response invalid → ask clarification question
+5. When ALL 7 TICs complete → AUTOMATICALLY call generate_benchmark_companies
 
 TIC QUESTIONS TO ASK:
 1. Vision: "What do you hope to achieve with this business in 5-10 years?"
@@ -470,28 +427,11 @@ TIC QUESTIONS TO ASK:
 6. USP: "What makes you different from competitors? What's unique?"
 7. Business Model: "How do you make money? What's your revenue model?"
 
-BRAINSTORMING PHASE - CRITICAL INSTRUCTIONS:
-When in brainstorming phase, you MUST follow this exact sequence:
-
-1. FIRST: Call get_next_brainstorming_question to get the exact predefined question
-2. Ask the EXACT question text returned by the tool - DO NOT modify, rephrase, or contextualize it
-3. After user answers: Call analyze_brainstorming_response AND update_tics_from_brainstorming
-4. Repeat: Call get_next_brainstorming_question for next question
-
-BRAINSTORMING RULES:
-- NEVER create your own questions
-- NEVER modify the predefined questions
-- NEVER make questions contextual to the business type
-- Always use get_next_brainstorming_question tool first
-- Ask the exact question text returned by the tool
-- Call both analyze_brainstorming_response AND update_tics_from_brainstorming after user answers
-
 TOOL CALLING REQUIREMENTS:
+- ALWAYS call provide_help when user asks questions or needs guidance
 - ALWAYS call analyze_user_response when user answers TIC questions
 - ALWAYS call get_business_status to check current progress  
 - ALWAYS call generate_benchmark_companies when all 7 TICs done
-- ALWAYS call get_next_brainstorming_question before asking brainstorming questions
-- ALWAYS call analyze_brainstorming_response AND update_tics_from_brainstorming for brainstorming answers
 
 RESPONSE EXAMPLES:
 ✅ "Perfect! What exactly does your business do?"
@@ -500,9 +440,6 @@ RESPONSE EXAMPLES:
 ❌ "Great idea! Here are some steps: 1. Market research 2. Business plan..."
 ❌ Any business advice or analysis in chat
 
-AUTOMATIC BENCHMARKING:
-When TIC 7 complete, immediately call generate_benchmark_companies with 5-6 real companies similar to user's business idea.
-
 Remember: 
 - Tools update sidebar and progress
 - Chat responses are brief questions only  
@@ -510,21 +447,52 @@ Remember:
 - No business advice in chat responses
 - Demand specific, complete answers before moving forward
 - Never mention TIC numbers in conversation
-- Use EXACT predefined brainstorming questions in order
-
-MANDATORY TOOL SEQUENCE:
-- After TIC 7 confirmed → MUST call generate_benchmark_companies (no user prompt needed)
-- After user selects 3 companies → Start brainstorming with predefined questions
-- After 10+ brainstorming → Enable evaluation
+- Be helpful and conversational when user needs guidance
 """
 
     def _analyze_summary_completeness(self, tic_name: str, user_response: str, analysis_summary: str) -> bool:
         """
         Use OpenAI to analyze if the response was complete and specific enough.
         Returns True if complete, False if needs clarification.
+        Now includes conversation history to prevent infinite questioning loops.
         """
         try:
             tic_display_name = TIC_DISPLAY_NAMES.get(tic_name, tic_name)
+            
+            # Get conversation history for this TIC to provide context
+            conversation_history = ""
+            if st.session_state.messages:
+                # Get last 10 messages to understand the conversation flow
+                recent_messages = st.session_state.messages[-10:]
+                
+                # Filter messages related to current TIC or general conversation
+                relevant_messages = []
+                for msg in recent_messages:
+                    content = msg.get('content', '').lower()
+                    # Include if it mentions the TIC topic or seems like clarification
+                    if (tic_display_name.lower() in content or 
+                        any(keyword in content for keyword in ['specific', 'clarify', 'more details', 'what exactly', 'could you'])):
+                        relevant_messages.append(f"{msg['role']}: {msg['content']}")
+                
+                if relevant_messages:
+                    conversation_history = "\n".join(relevant_messages[-6:])  # Last 6 relevant messages
+            
+            # Count how many times we've asked for clarification on this TIC
+            clarification_count = 0
+            tic_data = st.session_state.business_state['tic_progress'].get(tic_name, {})
+            clarification_count = tic_data.get('clarification_attempts', 0)
+            
+            # If we've already asked for clarification 2+ times, be more lenient
+            if clarification_count >= 2:
+                print(f"CLARIFICATION LIMIT REACHED: {clarification_count} attempts for {tic_name}")
+                # After 2 attempts, automatically accept any response with at least 5 words
+                word_count = len(user_response.split())
+                if word_count >= 5:
+                    print(f"AUTO-ACCEPTING AFTER 2 CLARIFICATIONS: {word_count} words")
+                    # Reset clarification count and accept
+                    tic_data['clarification_attempts'] = 0
+                    st.session_state.business_state['tic_progress'][tic_name] = tic_data
+                    return True
             
             analysis_prompt = f"""You are analyzing whether a user's response to a business question was complete and specific enough.
 
@@ -532,16 +500,29 @@ TIC Question: {tic_display_name}
 User Response: "{user_response}"
 Analysis Summary: "{analysis_summary}"
 
-Based on the analysis summary, determine if the user's response was:
-- COMPLETE: Specific, detailed, and fully addresses the question requirements
-- INCOMPLETE: Vague, lacks details, missing key information, or doesn't fully answer what was asked
+CONVERSATION HISTORY (for context):
+{conversation_history if conversation_history else "No previous conversation context available"}
 
-The analysis summary will often indicate if something is missing, lacks specifics, or is incomplete.
+CLARIFICATION ATTEMPTS: {clarification_count} (0=first attempt, 1+=already asked for clarification)
+
+IMPORTANT CONTEXT:
+- If clarification has been requested {clarification_count} times already, be MORE LENIENT
+- Look at conversation history to see if user has been progressively providing more detail
+- Don't keep asking for the same type of clarification repeatedly
+- If the user is clearly making an effort to provide details, accept reasonable responses
+
+Based on the analysis summary AND conversation context, determine if the user's response was:
+- COMPLETE: Specific enough, addresses the question requirements, or shows good faith effort after previous clarifications
+- INCOMPLETE: Still genuinely vague/missing key information AND this is a reasonable first/second clarification request
+
+The analysis summary will often indicate if something is missing, but consider the conversation flow and clarification history.
 
 Respond with only one word: "COMPLETE" or "INCOMPLETE"
 """
             
-            print(f"SENDING COMPLETENESS CHECK TO OPENAI...")
+            print(f"SENDING COMPLETENESS CHECK TO OPENAI WITH HISTORY...")
+            print(f"Clarification attempts: {clarification_count}")
+            print(f"Conversation history length: {len(conversation_history)}")
             print(f"Analysis Summary: {analysis_summary}")
             
             # Call OpenAI for completeness analysis
@@ -557,20 +538,40 @@ Respond with only one word: "COMPLETE" or "INCOMPLETE"
             
             is_complete = result == "COMPLETE"
             
+            # Update clarification attempt count if we're going to ask for more clarification
             if not is_complete:
+                tic_data['clarification_attempts'] = clarification_count + 1
+                st.session_state.business_state['tic_progress'][tic_name] = tic_data
                 print(f"INCOMPLETE RESPONSE DETECTED BY OPENAI: {analysis_summary}")
+                print(f"CLARIFICATION ATTEMPTS NOW: {clarification_count + 1}")
+            else:
+                # Reset clarification count on successful completion
+                tic_data['clarification_attempts'] = 0
+                st.session_state.business_state['tic_progress'][tic_name] = tic_data
+                print(f"RESPONSE ACCEPTED - CLARIFICATION COUNT RESET")
             
             return is_complete
             
         except Exception as e:
             print(f"ERROR IN OPENAI COMPLETENESS CHECK: {str(e)}")
             # Fallback to simple check if OpenAI fails
+            clarification_count = st.session_state.business_state['tic_progress'].get(tic_name, {}).get('clarification_attempts', 0)
+            
+            # If we've tried multiple times, be lenient in fallback
+            if clarification_count >= 2:
+                return len(user_response.strip()) >= 20
+            
+            # Standard fallback logic
             incomplete_keywords = ["lacks", "missing", "vague", "unclear", "does not", "doesn't", "no information", "incomplete"]
             summary_lower = analysis_summary.lower()
             
             for keyword in incomplete_keywords:
                 if keyword in summary_lower:
                     print(f"FALLBACK: Found incomplete keyword '{keyword}'")
+                    # Update clarification count in fallback too
+                    tic_data = st.session_state.business_state['tic_progress'].get(tic_name, {})
+                    tic_data['clarification_attempts'] = clarification_count + 1
+                    st.session_state.business_state['tic_progress'][tic_name] = tic_data
                     return False
             
             return True
@@ -584,11 +585,6 @@ Respond with only one word: "COMPLETE" or "INCOMPLETE"
         if tool_name == "get_business_status":
             result = self.state_manager.handle_tool_call("get_tic_status", {})
             print(f"BUSINESS STATUS RETRIEVED: {result['data']['phase']}, {result['data']['completed_count']}/7")
-            return result
-
-        elif tool_name == "get_brainstorming_status":
-            result = self.state_manager.handle_tool_call("get_brainstorming_status", {})
-            print(f"BRAINSTORMING STATUS RETRIEVED: {result['data']['completed_count']}/20")
             return result
             
         elif tool_name == "analyze_user_response":
@@ -605,11 +601,8 @@ Respond with only one word: "COMPLETE" or "INCOMPLETE"
                 "user_response": user_response
             })
             
-            print(f"BASIC VALIDATION RESULT: {validation_result['data']['is_valid']}")
-            
             # Check if response is complete based on summary analysis using OpenAI
             is_complete = self._analyze_summary_completeness(tic_name, user_response, analysis_summary)
-            print(f"COMPLETENESS CHECK: {is_complete}")
             
             # If basic validation passes AND response is complete, mark as confirmed
             if validation_result['data']['is_valid'] and is_complete:
@@ -629,13 +622,8 @@ Respond with only one word: "COMPLETE" or "INCOMPLETE"
                         "update_result": update_result['data']
                     },
                     "message": f"TIC {tic_name} analyzed and confirmed",
-                     "instruction": """Give brief acknowledgment and ask next TIC question only. NO business advice.
-                    When TIC 7 (Business Model) is marked as "confirmed" status:
-1. generate_benchmark_companies tool MUST be called automatically
-2. Do NOT ask "Would you like a summary?"
-3. Do NOT ask "What's next?" 
-4. Do NOT wait for user input
-5. Do NOT offer choices"""}
+                    "instruction": "ask next TIC question only. NO business advice.and do not say anything else like thank you and do not give any summary or anything"
+                }
                 
                 print(f"ANALYSIS COMPLETE: {json.dumps(final_result, indent=2)}")
                 return final_result
@@ -650,247 +638,12 @@ Respond with only one word: "COMPLETE" or "INCOMPLETE"
                         "reason": "Needs clarification" if not is_complete else "Basic validation failed"
                     },
                     "message": "Response needs improvement or clarification",
-                    "instruction": "Ask clarifying question to get more specific details. Stay on current TIC.the question you asked must be concoise"
+                    "instruction": "Ask clarifying question to get more specific details. Stay on current TIC.the clarifying question should be concise."
                 }
                 
                 print(f"ANALYSIS INCOMPLETE: {json.dumps(incomplete_result, indent=2)}")
                 return incomplete_result
 
-        elif tool_name == "get_next_brainstorming_question":
-            print(f"GETTING NEXT BRAINSTORMING QUESTION")
-            
-            # Get current brainstorming status
-            brainstorming_status = self.state_manager.handle_tool_call("get_brainstorming_status", {})
-            
-            if brainstorming_status['success']:
-                current_question_index = brainstorming_status['data']['current_question']
-                
-                # Check if we have more questions
-                if current_question_index < len(BRAINSTORMING_QUESTIONS):
-                    question_text = BRAINSTORMING_QUESTIONS[current_question_index]
-                    category = BRAINSTORMING_CATEGORIES[current_question_index]
-                    
-                    result = {
-                        "success": True,
-                        "data": {
-                            "question_index": current_question_index,
-                            "question_text": question_text,
-                            "category": category,
-                            "progress": f"{current_question_index + 1}/20"
-                        },
-                        "message": f"Question {current_question_index + 1} ready",
-                        "instruction": f"Ask this EXACT question without any modifications, additions, or context: '{question_text}' - Do not rephrase, contextualize, or create your own question."
-                    }
-                    
-                    print(f"NEXT QUESTION READY: {current_question_index + 1}/20")
-                    print(f"QUESTION: {question_text}")
-                    return result
-                else:
-                    # All questions completed
-                    result = {
-                        "success": True,
-                        "data": {
-                            "all_completed": True,
-                            "total_questions": 20
-                        },
-                        "message": "All 20 brainstorming questions completed!"
-                    }
-                    
-                    print(f"ALL BRAINSTORMING QUESTIONS COMPLETED!")
-                    return result
-            else:
-                error_result = {
-                    "success": False,
-                    "data": {},
-                    "message": "Error getting brainstorming status"
-                }
-                print(f"ERROR GETTING BRAINSTORMING STATUS")
-                return error_result
-
-        elif tool_name == "update_tics_from_brainstorming":
-            question_index = arguments.get('question_index')
-            user_answer = arguments.get('user_answer')
-            question_text = arguments.get('question_text')
-            
-            print(f"UPDATING TICS FROM BRAINSTORMING: Question {question_index + 1}/20")
-            print(f"Question: {question_text}")
-            print(f"Answer: {user_answer[:100]}...")
-            
-            try:
-                # Use OpenAI to dynamically determine which TIC(s) this question and answer relate to
-                dynamic_mapping_prompt = f"""Analyze this brainstorming question and user answer to determine which business component (TIC) it relates to most.
-
-Question: "{question_text}"
-User Answer: "{user_answer}"
-
-Available TIC categories:
-- vision: Long-term goals, purpose, what the business aims to achieve
-- businessOverview: Core offering, what the business does, technologies needed
-- marketSize: Market size, growth trends, timing, market conditions  
-- targetCustomers: Who the customers are, customer segments, how to reach them
-- valueProposition: Benefits provided to customers, problems solved, customer value
-- usp: Unique advantages, differentiation, competitive advantages
-- businessModel: Revenue model, cost structure, sustainability, funding
-
-Based on the question content and user's answer, which TIC category is this MOST relevant to?
-
-Respond with only the TIC category name (e.g., "vision" or "marketSize" or "valueProposition")."""
-
-                print(f"SENDING DYNAMIC MAPPING REQUEST TO OPENAI...")
-                
-                # Call OpenAI for dynamic mapping
-                response = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[{"role": "user", "content": dynamic_mapping_prompt}],
-                    temperature=0,
-                    max_tokens=20
-                )
-                
-                mapped_tic = response.choices[0].message.content.strip().lower()
-                print(f"DYNAMIC MAPPING RESULT: {mapped_tic}")
-                
-                # Validate that the mapped TIC exists
-                valid_tics = ["vision", "businessoverview", "marketsize", "targetcustomers", "valueproposition", "usp", "businessmodel"]
-                if mapped_tic not in valid_tics:
-                    print(f"INVALID TIC MAPPING: {mapped_tic}, defaulting to 'businessOverview'")
-                    mapped_tic = "businessoverview"
-                
-                # Convert to proper TIC name format
-                tic_name_mapping = {
-                    "vision": "vision",
-                    "businessoverview": "businessOverview", 
-                    "marketsize": "marketSize",
-                    "targetcustomers": "targetCustomers",
-                    "valueproposition": "valueProposition",
-                    "usp": "usp",
-                    "businessmodel": "businessModel"
-                }
-                
-                final_tic_name = tic_name_mapping.get(mapped_tic, "businessOverview")
-                print(f"FINAL TIC NAME: {final_tic_name}")
-                
-                # Use OpenAI to analyze and create an enhanced summary
-                enhancement_prompt = f"""You are enhancing a TIC (business component) summary based on new information from a brainstorming question.
-
-Current TIC: {TIC_DISPLAY_NAMES.get(final_tic_name, final_tic_name)}
-Brainstorming Question: {question_text}
-User's Answer: {user_answer}
-
-Current TIC Summary: {st.session_state.business_state['tic_progress'][final_tic_name].get('summary', 'No previous summary')}
-
-Based on the user's brainstorming answer, create an enhanced summary for this TIC that incorporates the new insights. If the brainstorming answer provides valuable additional details, integrate them. If it contradicts previous information, use the more recent/detailed information.
-
-Provide a comprehensive but concise summary (2-3 sentences maximum) that captures the enhanced understanding of this business component.
-
-Return only the enhanced summary text."""
-
-                print(f"ENHANCING TIC {final_tic_name} WITH BRAINSTORMING ANSWER...")
-                
-                # Call OpenAI for enhancement
-                enhancement_response = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[{"role": "user", "content": enhancement_prompt}],
-                    temperature=0.3,
-                    max_tokens=200
-                )
-                
-                enhanced_summary = enhancement_response.choices[0].message.content.strip()
-                
-                # Update the TIC with enhanced information
-                current_tic_data = st.session_state.business_state['tic_progress'][final_tic_name]
-                current_tic_data['summary'] = enhanced_summary
-                current_tic_data['enhanced_from_brainstorming'] = True
-                current_tic_data['brainstorming_questions'] = current_tic_data.get('brainstorming_questions', [])
-                current_tic_data['brainstorming_questions'].append({
-                    'question_index': question_index,
-                    'question': question_text,
-                    'answer': user_answer,
-                    'mapped_tic': final_tic_name
-                })
-                
-                result = {
-                    "success": True,
-                    "data": {
-                        "enhanced_tic": final_tic_name,
-                        "enhanced_summary": enhanced_summary,
-                        "question_index": question_index,
-                        "dynamic_mapping": mapped_tic
-                    },
-                    "message": f"Enhanced {final_tic_name} TIC with brainstorming insights using dynamic mapping",
-                    "instruction": "MUST call get_next_brainstorming_question tool next to get the exact predefined question. Do not create your own question."
-                }
-                
-                print(f"TIC {final_tic_name} ENHANCED SUCCESSFULLY WITH DYNAMIC MAPPING")
-                return result
-                
-            except Exception as e:
-                print(f"ERROR IN DYNAMIC MAPPING OR ENHANCEMENT: {str(e)}")
-                # Fallback: just store the brainstorming answer without enhancement
-                fallback_tic = "businessOverview"
-                current_tic_data = st.session_state.business_state['tic_progress'][fallback_tic]
-                current_tic_data['brainstorming_questions'] = current_tic_data.get('brainstorming_questions', [])
-                current_tic_data['brainstorming_questions'].append({
-                    'question_index': question_index,
-                    'question': question_text,
-                    'answer': user_answer,
-                    'error': str(e)
-                })
-                
-                result = {
-                    "success": True,
-                    "data": {
-                        "stored_answer": True,
-                        "question_index": question_index,
-                        "fallback_tic": fallback_tic
-                    },
-                    "message": f"Stored brainstorming answer in {fallback_tic} (fallback due to error)",
-                    "instruction": "MUST call get_next_brainstorming_question tool next to get the exact predefined question. Do not create your own question."
-                }
-                
-                return result
-
-        elif tool_name == "analyze_brainstorming_response":
-            question_index = arguments.get('question_index')
-            user_answer = arguments.get('user_answer')
-            
-            print(f"ANALYZING BRAINSTORMING RESPONSE: Question {question_index + 1}/20")
-            
-            # Basic validation
-            is_valid = len(user_answer.strip()) >= 15
-            
-            if is_valid:
-                update_result = self.state_manager.handle_tool_call("update_brainstorming_progress", {
-                    "question_index": question_index,
-                    "user_answer": user_answer,
-                    "status": "completed"
-                })
-                
-                final_result = {
-                    "success": True,
-                    "data": {
-                        "question_completed": True,
-                        "question_index": question_index,
-                        "update_result": update_result['data']
-                    },
-                    "message": f"Question {question_index + 1} completed successfully",
-                    "instruction": """you MUST immediately call update_tics_from_brainstorming. 
-NO user response needed. NO "continue?" questions. NO waiting for permission."""}
-                
-                print(f"BRAINSTORMING QUESTION COMPLETE: {json.dumps(final_result, indent=2)}")
-                return final_result
-            else:
-                incomplete_result = {
-                    "success": False,
-                    "data": {
-                        "question_completed": False,
-                        "reason": "Answer too short"
-                    },
-                    "message": "Please provide a more detailed answer"
-                }
-                
-                print(f"BRAINSTORMING ANSWER INCOMPLETE: {json.dumps(incomplete_result, indent=2)}")
-                return incomplete_result
-                
         elif tool_name == "generate_benchmark_companies":
             company_suggestions = arguments.get('company_suggestions', [])
             
@@ -914,6 +667,28 @@ NO user response needed. NO "continue?" questions. NO waiting for permission."""
             print(f"BENCHMARK COMPANIES GENERATED: {json.dumps(result, indent=2)}")
             return result
         
+        elif tool_name == "provide_help":
+            user_question = arguments.get('user_question', '')
+            help_type = arguments.get('help_type', 'explanation')
+            context = arguments.get('context', '')
+            
+            print(f"PROVIDING HELP: {help_type} for '{user_question}'")
+            
+            # This tool just acknowledges that help was requested
+            # The actual helpful response will be in the LLM's chat response
+            result = {
+                "success": True,
+                "data": {
+                    "help_provided": True,
+                    "help_type": help_type,
+                    "user_question": user_question
+                },
+                "message": "Help provided to user"
+            }
+            
+            print(f"HELP PROVIDED: {json.dumps(result, indent=2)}")
+            return result
+        
         else:
             error_result = {
                 "success": False,
@@ -922,6 +697,7 @@ NO user response needed. NO "continue?" questions. NO waiting for permission."""
             }
             print(f"BUSINESS CONSULTANT ERROR: {json.dumps(error_result, indent=2)}")
             return error_result
+
 # ===================================================================
 # EVALUATION SYSTEM
 # ===================================================================
@@ -1048,7 +824,7 @@ Critically compare this business idea against the benchmark companies. Consider 
         return error_result
 
 # ===================================================================
-# AGENT ORCHESTRATOR
+# AGENT ORCHESTRATOR - UPDATED WITH MANUAL LOGIC
 # ===================================================================
 
 class AgentOrchestrator:
@@ -1061,26 +837,373 @@ class AgentOrchestrator:
             print(f"\nORCHESTRATOR: Processing User Input")
             print(f"Input Length: {len(user_input)} characters")
             
-            # The consultant agent leads the conversation
-            response = client.responses.create(
-                model="gpt-4.1",
-                tools=self.consultant.tools,
-                instructions=self.consultant.system_instructions,
-                conversation=conversation_id,
-                input=[{"role": "user", "content": user_input}],
-                temperature=0.7
-            )
-
-            # Handle tool calls
-            assistant_content = self._handle_agent_response(response, conversation_id)
+            current_phase = st.session_state.business_state['phase']
+            print(f"Current Phase: {current_phase}")
             
-            print(f"FINAL RESPONSE LENGTH: {len(assistant_content)} characters")
-            return assistant_content
+            # Handle different phases
+            if current_phase == 'tic_collection':
+                # Normal TIC collection with LLM
+                response = client.responses.create(
+                    model="gpt-4.1",
+                    tools=self.consultant.tools,
+                    instructions=self.consultant.system_instructions,
+                    conversation=conversation_id,
+                    input=[{"role": "user", "content": user_input}],
+                    temperature=0.7
+                )
+                
+                assistant_content = self._handle_agent_response(response, conversation_id)
+                
+                # Check if TIC 7 just completed - if so, auto-generate benchmark companies
+                if (st.session_state.business_state['current_tic'] == 'completed' and 
+                    st.session_state.business_state['phase'] == 'benchmarking'):
+                    
+                    print("TIC 7 COMPLETED - AUTO-GENERATING BENCHMARK COMPANIES")
+                    benchmark_result = self._auto_generate_benchmark_companies()
+                    if benchmark_result['success']:
+                        assistant_content += "\n\nI've generated benchmark companies for your business idea. Please select 3 companies from the sidebar to proceed with detailed brainstorming."
+                
+                return assistant_content
+                
+            elif current_phase == 'benchmarking':
+                # Check if 3 companies selected
+                selected_companies = st.session_state.business_state.get('selected_companies', [])
+                if len(selected_companies) == 3:
+                    # Auto-start brainstorming
+                    print("3 COMPANIES SELECTED - AUTO-STARTING BRAINSTORMING")
+                    st.session_state.business_state['phase'] = 'brainstorming'
+                    if 'brainstorming_progress' not in st.session_state.business_state:
+                        st.session_state.business_state['brainstorming_progress'] = {
+                            'current_question': 0,
+                            'completed_count': 0,
+                            'answers': {}
+                        }
+                    
+                    first_question = BRAINSTORMING_QUESTIONS[0]
+                    return f"Great! Now that you've selected your benchmark companies, let's dive deep into your business idea with detailed questions.\n\n**Question 1/20:** {first_question}"
+                else:
+                    # Use LLM for conversational response about company selection
+                    response = client.responses.create(
+                        model="gpt-4.1",
+                        tools=[],
+                        instructions="You are a business consultant. The user is in benchmarking phase and needs to select 3 companies from the sidebar. Be helpful and guide them to complete the selection. Keep response brief and conversational.",
+                        conversation=conversation_id,
+                        input=[{"role": "user", "content": user_input}],
+                        temperature=0.7
+                    )
+                    return self._extract_assistant_content(response)
+                    
+            elif current_phase == 'brainstorming':
+                # Handle brainstorming sequence automatically
+                brainstorming_state = st.session_state.business_state.get('brainstorming_progress', {})
+                completed_count = brainstorming_state.get('completed_count', 0)
+                
+                # Check if user is responding to the 10-question choice
+                if completed_count == 10 and len(user_input.strip()) < 50:
+                    user_choice = user_input.strip().lower()
+                    if 'end' in user_choice or 'finish' in user_choice or 'stop' in user_choice:
+                        print("USER CHOSE TO END BRAINSTORMING AT 10 QUESTIONS")
+                        st.session_state.business_state['phase'] = 'evaluation_ready'
+                        return "Perfect! You've completed the core brainstorming questions. You can now generate your comprehensive evaluation report from the sidebar."
+                    elif 'continue' in user_choice or 'more' in user_choice or 'next' in user_choice:
+                        print("USER CHOSE TO CONTINUE WITH REMAINING 10 QUESTIONS")
+                        # Continue with question 11
+                        next_question = BRAINSTORMING_QUESTIONS[10]  # Question 11 (index 10)
+                        return next_question
+                    else:
+                        return "Please type 'end' to finish brainstorming or 'continue' to proceed with the remaining 10 questions."
+                
+                # Normal brainstorming sequence
+                return self._handle_brainstorming_sequence(user_input)
+            
+            else:
+                return "I'm ready to help you develop your business concept!"
 
         except Exception as e:
             error_msg = f"Error processing input: {str(e)}"
             print(f"ORCHESTRATOR ERROR: {error_msg}")
             return error_msg
+    
+    def _auto_generate_benchmark_companies(self) -> dict:
+        """Automatically generate benchmark companies based on business idea"""
+        try:
+            # Get business context from TICs
+            tic_progress = st.session_state.business_state['tic_progress']
+            industry = st.session_state.business_state['industry']
+            
+            # Build context from completed TICs
+            business_context = f"Industry: {industry}\n"
+            for tic_name, tic_data in tic_progress.items():
+                if tic_data['status'] == 'confirmed' and tic_data['summary']:
+                    display_name = TIC_DISPLAY_NAMES.get(tic_name, tic_name)
+                    business_context += f"{display_name}: {tic_data['summary']}\n"
+            
+            # Generate companies using OpenAI
+            company_prompt = f"""Based on this business idea, suggest 5-6 real companies that would serve as good benchmarks for comparison and analysis.
+
+Business Context:
+{business_context}
+
+Provide real companies that are:
+1. Similar in business model or target market
+2. Well-known and established
+3. Relevant for competitive analysis
+4. Mix of direct and indirect competitors
+
+Return as JSON array with this format:
+[
+  {{
+    "name": "Company Name",
+    "description": "Brief description of what they do and why relevant",
+    "relevance": "Why this is a good benchmark"
+  }}
+]
+
+Return only valid JSON, no other text."""
+
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": company_prompt}],
+                response_format={"type": "json_object"},
+                temperature=0.3
+            )
+            
+            companies_data = json.loads(response.choices[0].message.content)
+            
+            # Handle both array and object responses
+            if isinstance(companies_data, dict) and 'companies' in companies_data:
+                companies = companies_data['companies']
+            elif isinstance(companies_data, list):
+                companies = companies_data
+            else:
+                companies = []
+            
+            # Call the actual tool
+            result = self.consultant.handle_tool_call("generate_benchmark_companies", {
+                "company_suggestions": companies
+            })
+            
+            return result
+            
+        except Exception as e:
+            print(f"ERROR AUTO-GENERATING BENCHMARK COMPANIES: {str(e)}")
+            return {"success": False, "message": str(e)}
+    
+    def _handle_brainstorming_sequence(self, user_input: str) -> str:
+        """Handle brainstorming phase with intelligent validation and conversational ability"""
+        try:
+            brainstorming_state = st.session_state.business_state.get('brainstorming_progress', {})
+            current_question_index = brainstorming_state.get('current_question', 0)
+            current_question = BRAINSTORMING_QUESTIONS[current_question_index]
+            
+            print(f"BRAINSTORMING SEQUENCE START: Question {current_question_index + 1}")
+            print(f"Current Question: {current_question}")
+            print(f"User input: {user_input[:100]}...")
+            
+            # Step 1: Validate if this is a meaningful answer using LLM
+            validation_result = self._validate_brainstorming_answer(user_input, current_question, current_question_index)
+            
+            if not validation_result['is_valid']:
+                print(f"INVALID ANSWER DETECTED: {validation_result['reason']}")
+                return validation_result['response']
+            
+            print("ANSWER VALIDATION PASSED")
+            
+            # Step 2: Update brainstorming progress
+            print("STEP 2: Updating brainstorming progress...")
+            update_result = self.state_manager.handle_tool_call("update_brainstorming_progress", {
+                "question_index": current_question_index,
+                "user_answer": user_input,
+                "status": "completed"
+            })
+            
+            if not update_result['success']:
+                return "Please provide a more detailed answer."
+            
+            print("STEP 2 COMPLETED: Brainstorming progress updated")
+            
+            # Step 3: Update TICs from brainstorming (dynamic mapping)
+            print("STEP 3: Updating TICs from brainstorming...")
+            self._update_tics_from_brainstorming(current_question_index, user_input)
+            print("STEP 3 COMPLETED: TICs updated from brainstorming")
+            
+            # Step 4: Get next question or complete
+            print("STEP 4: Getting next question...")
+            updated_state = st.session_state.business_state['brainstorming_progress']
+            next_question_index = updated_state.get('current_question', 0)
+            completed_count = updated_state.get('completed_count', 0)
+            
+            print(f"Next question index: {next_question_index}")
+            print(f"Completed count: {completed_count}")
+            
+            # Check if we just completed 10 questions - offer choice
+            if completed_count == 10:
+                print("STEP 4: 10 QUESTIONS COMPLETED - OFFERING CHOICE")
+                return "You've completed 10 out of 20 brainstorming questions! You can either:\n\n🚪 **End brainstorming here** and proceed to evaluation\n➡️ **Continue** with the remaining 10 questions\n\nWhat would you like to do? (Type 'end' to finish or 'continue' for more questions)"
+            
+            # Continue with remaining questions (11-20)
+            elif next_question_index < len(BRAINSTORMING_QUESTIONS):
+                next_question = BRAINSTORMING_QUESTIONS[next_question_index]
+                print(f"STEP 4 COMPLETED: Next question ready - Q{next_question_index + 1}")
+                return next_question  # Clean question format without "Thanks!" or numbering
+            else:
+                print("STEP 4 COMPLETED: All questions finished")
+                return "Congratulations! You've completed all 20 brainstorming questions. You can now generate your evaluation report from the sidebar."
+            
+        except Exception as e:
+            print(f"ERROR IN BRAINSTORMING SEQUENCE: {str(e)}")
+            import traceback
+            print(f"FULL ERROR TRACEBACK: {traceback.format_exc()}")
+            return f"Error processing your answer: {str(e)}"
+    
+    def _validate_brainstorming_answer(self, user_input: str, question: str, question_index: int) -> dict:
+        """Validate brainstorming answer using LLM for intelligent checking"""
+        try:
+            # Basic length check
+            if len(user_input.strip()) < 10:
+                return {
+                    "is_valid": False,
+                    "reason": "too_short",
+                    "response": "Please provide a more detailed answer (at least a few words)."
+                }
+            
+            # Use LLM to analyze if the response is a valid answer or needs help
+            validation_prompt = f"""Analyze this user response to a brainstorming question.
+
+Question: "{question}"
+User Response: "{user_input}"
+
+Determine if the user response is:
+
+1. VALID_ANSWER: A meaningful attempt to answer the question (even if brief or needs more detail)
+2. ASKING_QUESTION: User is asking for clarification or doesn't understand the question 
+3. GIBBERISH: Random letters, nonsense, or completely unrelated content
+4. NEEDS_HELP: User seems confused or stuck
+
+For ASKING_QUESTION, provide a helpful explanation and rephrase the question.
+For GIBBERISH or NEEDS_HELP, provide guidance to help them answer properly.
+
+Respond in this exact JSON format:
+{{
+  "category": "VALID_ANSWER|ASKING_QUESTION|GIBBERISH|NEEDS_HELP",
+  "explanation": "Brief explanation of why this category was chosen",
+  "response": "What to say to the user (if not VALID_ANSWER)"
+}}
+
+Be helpful and encouraging. If user asks about terms like TAM, explain them clearly."""
+
+            print("SENDING VALIDATION REQUEST TO LLM...")
+            
+            # Call OpenAI for validation
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": validation_prompt}],
+                response_format={"type": "json_object"},
+                temperature=0.3,
+                max_tokens=300
+            )
+            
+            validation_data = json.loads(response.choices[0].message.content)
+            category = validation_data.get('category', 'NEEDS_HELP')
+            
+            print(f"VALIDATION RESULT: {category}")
+            print(f"EXPLANATION: {validation_data.get('explanation', '')}")
+            
+            if category == 'VALID_ANSWER':
+                return {
+                    "is_valid": True,
+                    "reason": "valid_answer",
+                    "response": ""
+                }
+            else:
+                # For all other categories, provide helpful response
+                helpful_response = validation_data.get('response', 'Please provide a meaningful answer to the question.')
+                return {
+                    "is_valid": False,
+                    "reason": category.lower(),
+                    "response": helpful_response
+                }
+                
+        except Exception as e:
+            print(f"ERROR IN ANSWER VALIDATION: {str(e)}")
+            # Fallback to basic validation
+            if len(user_input.strip()) >= 15:
+                return {"is_valid": True, "reason": "fallback_valid", "response": ""}
+            else:
+                return {
+                    "is_valid": False, 
+                    "reason": "fallback_short",
+                    "response": "Please provide a more detailed answer."
+                }
+    
+    def _update_tics_from_brainstorming(self, question_index: int, user_answer: str):
+        """Update TICs based on brainstorming answer using dynamic mapping"""
+        try:
+            question_text = BRAINSTORMING_QUESTIONS[question_index]
+            
+            # Use OpenAI to dynamically determine which TIC this relates to
+            mapping_prompt = f"""Analyze this brainstorming question and user answer to determine which business component (TIC) it relates to most.
+
+Question: "{question_text}"
+User Answer: "{user_answer}"
+
+Available TIC categories:
+- vision: Long-term goals, purpose, what the business aims to achieve
+- businessOverview: Core offering, what the business does, technologies needed
+- marketSize: Market size, growth trends, timing, market conditions  
+- targetCustomers: Who the customers are, customer segments
+- valueProposition: Benefits provided to customers, problems solved
+- usp: Unique advantages, differentiation, competitive advantages
+- businessModel: Revenue model, cost structure, sustainability, funding
+
+Respond with only the TIC category name (e.g., "vision" or "marketSize")."""
+
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": mapping_prompt}],
+                temperature=0,
+                max_tokens=20
+            )
+            
+            mapped_tic = response.choices[0].message.content.strip().lower()
+            
+            # Convert to proper TIC name format
+            tic_mapping = {
+                "vision": "vision",
+                "businessoverview": "businessOverview", 
+                "marketsize": "marketSize",
+                "targetcustomers": "targetCustomers",
+                "valueproposition": "valueProposition",
+                "usp": "usp",
+                "businessmodel": "businessModel"
+            }
+            
+            final_tic_name = tic_mapping.get(mapped_tic, "businessOverview")
+            
+            # Enhance the TIC summary
+            current_tic_data = st.session_state.business_state['tic_progress'][final_tic_name]
+            current_summary = current_tic_data.get('summary', 'No previous summary')
+            
+            enhancement_prompt = f"""Enhance this TIC summary with new brainstorming insights.
+
+Current Summary: {current_summary}
+New Information: {user_answer}
+
+Create an enhanced summary (2-3 sentences) that incorporates the new insights."""
+
+            enhancement_response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": enhancement_prompt}],
+                temperature=0.3,
+                max_tokens=150
+            )
+            
+            enhanced_summary = enhancement_response.choices[0].message.content.strip()
+            current_tic_data['summary'] = enhanced_summary
+            current_tic_data['enhanced_from_brainstorming'] = True
+            
+        except Exception as e:
+            print(f"ERROR UPDATING TICS FROM BRAINSTORMING: {str(e)}")
     
     def _handle_agent_response(self, response, conversation_id: str) -> str:
         tool_call_count = 0
@@ -1270,8 +1393,8 @@ def auto_start_conversation():
 # MAIN STREAMLIT APP
 # ===================================================================
 
-st.title("Two-Agent Business Consultation System")
-st.markdown("*Powered by Business Consultant Agent + State Manager Agent*")
+st.title("Business Consultation System with Manual Tool Control")
+st.markdown("*Automated TIC Collection → Auto Benchmarking → Auto Brainstorming → AI Evaluation*")
 
 initialize_session_state()
 
@@ -1397,11 +1520,14 @@ with st.sidebar:
                         st.session_state.business_state['selected_companies'].append(company_name)
                         print(f"COMPANY SELECTED: {company_name}")
                         
-                        # If 3 companies selected, start brainstorming automatically
+                        # If 3 companies selected, auto-start brainstorming immediately
                         if len(st.session_state.business_state['selected_companies']) == 3:
+                            print(f"3 COMPANIES SELECTED - AUTO-STARTING BRAINSTORMING IMMEDIATELY")
+                            
+                            # Change phase to brainstorming
                             st.session_state.business_state['phase'] = 'brainstorming'
                             
-                            # Initialize brainstorming if not exists
+                            # Initialize brainstorming progress
                             if 'brainstorming_progress' not in st.session_state.business_state:
                                 st.session_state.business_state['brainstorming_progress'] = {
                                     'current_question': 0,
@@ -1409,20 +1535,13 @@ with st.sidebar:
                                     'answers': {}
                                 }
                             
-                            # Send message to start brainstorming
-                            auto_message = f"I've selected {', '.join(st.session_state.business_state['selected_companies'])} as benchmark companies. Let's start the detailed brainstorming session to refine my business idea."
+                            # Add auto-start message to chat
+                            auto_message = f"Great! Now that you've selected your benchmark companies ({', '.join(st.session_state.business_state['selected_companies'])}), let's dive deep into your business idea with detailed questions."
+                            first_question = BRAINSTORMING_QUESTIONS[0]
                             
-                            # Process the auto message
-                            assistant_response = st.session_state.orchestrator.process_user_input(
-                                auto_message, 
-                                st.session_state.conversation_id
-                            )
+                            st.session_state.messages.append({"role": "assistant", "content": f"{auto_message}\n\n{first_question}"})
                             
-                            # Add messages to chat
-                            st.session_state.messages.append({"role": "user", "content": auto_message})
-                            st.session_state.messages.append({"role": "assistant", "content": assistant_response})
-                            
-                            print(f"AUTO-STARTED BRAINSTORMING WITH: {st.session_state.business_state['selected_companies']}")
+                            print(f"AUTO-STARTED BRAINSTORMING WITH FIRST QUESTION")
                     
                     st.rerun()
             
@@ -1558,12 +1677,12 @@ else:
         with st.chat_message("user"):
             st.markdown(user_input)
 
-        with st.spinner("Business Consultant & State Manager working together..."):
+        with st.spinner("Processing with automated tool control..."):
             print(f"\nUSER INPUT RECEIVED: {user_input}")
             print(f"Current Session: {st.session_state.current_session_id}")
             print(f"Current Business State: {st.session_state.business_state['phase']}")
             
-            # Process through orchestrator
+            # Process through orchestrator with manual control
             assistant_response = st.session_state.orchestrator.process_user_input(
                 user_input, 
                 st.session_state.conversation_id
@@ -1582,5 +1701,4 @@ else:
 
 # Footer
 st.markdown("---")
-
-st.markdown("**Two-Agent Business Consultation System** - Complete with TIC Collection, Benchmark Analysis, 20-Question Brainstorming & AI Evaluation!")
+st.markdown("**Business Consultation System with Automated Tool Control** - Complete workflow automation!")
