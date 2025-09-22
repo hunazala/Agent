@@ -35,38 +35,14 @@ TIC_DISPLAY_NAMES = {
     "businessModel": "Business Model & Revenue Strategy"
 }
 
-# Brainstorming Questions (20 detailed evaluation questions)
-BRAINSTORMING_QUESTIONS = [
-    "What specific value does this business idea aim to bring to the world?",
-    "Why is now the right time to pursue this business opportunity?", 
-    "What is your personal motivation or passion behind this business venture?",
-    "What is the estimated size of your target market? Can you define TAM/SAM/SOM if possible?",
-    "How much growth is expected in this market over the next 5-10 years?",
-    "What specific trends or forces are driving growth in your market?",
-    "What revenue model are you planning (subscription, licensing, D2C, etc.)?",
-    "Through which channels will you primarily earn revenue?",
-    "What is your cost structure and how will it lead to profitability?",
-    "Is the timing right for market entry based on current conditions?",
-    "How competitive is your market and what barriers to entry exist?",
-    "What makes you different - why would customers choose you over competitors?",
-    "What makes your competitive advantage defensible long-term?",
-    "What specific frustrations or unmet needs do your customers face today?",
-    "Who exactly needs your product and what triggers them to pay for solutions?",
-    "Beyond solving problems, what exciting future do you offer users?",
-    "How is your business model sustainable from environmental, social, and economic perspectives?",
-    "What core technologies are required and do they already exist?",
-    "What funding would be needed to build and launch this business?",
-    "What is the biggest challenge or risk to successful implementation?"
-]
-
-BRAINSTORMING_CATEGORIES = [
-    "Vision", "Vision", "Vision",
-    "Market", "Market", "Market", "Market", "Market", "Market", "Market", 
-    "USP", "USP", "USP",
-    "Value Prop", "Value Prop", "Value Prop",
-    "Sustainability",
-    "Execution", "Execution", "Execution"
-]
+# AI-Generated Dynamic Questions (max 20 questions)
+# Questions are now generated dynamically based on:
+# - TIC responses (7 business components)
+# - Selected benchmark companies
+# - Previous answers and context
+# - 7 evaluation criteria: Vision, Market Opportunity, USP & Competitive Advantage,
+#   Value Proposition, Sustainability, Execution Feasibility
+# - Progress-based focus areas for strategic questioning
 
 # ===================================================================
 # STATE MANAGER AGENT (Data & Progress Handler)
@@ -94,13 +70,15 @@ class StateManagerAgent:
             {
                 "type": "function",
                 "name": "update_brainstorming_progress",
-                "description": "Update brainstorming question progress",
+                "description": "Update brainstorming question progress with dynamic question data",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "question_index": {"type": "integer"},
                         "user_answer": {"type": "string"},
-                        "status": {"type": "string", "enum": ["completed"]}
+                        "status": {"type": "string", "enum": ["completed"]},
+                        "question_text": {"type": "string", "description": "The actual question text that was asked"},
+                        "question_category": {"type": "string", "description": "Category of the question (e.g., Vision, Market, USP, etc.)"}
                     },
                     "required": ["question_index", "user_answer", "status"],
                     "additionalProperties": False
@@ -227,9 +205,11 @@ class StateManagerAgent:
             question_index = arguments.get('question_index')
             user_answer = arguments.get('user_answer')
             status = arguments.get('status')
-            
+            question_text = arguments.get('question_text', 'Dynamic AI-generated question')
+            question_category = arguments.get('question_category', 'General')
+
             print(f"UPDATING BRAINSTORMING: Question {question_index + 1}/20")
-            
+
             # Initialize brainstorming progress if not exists
             if 'brainstorming_progress' not in st.session_state.business_state:
                 st.session_state.business_state['brainstorming_progress'] = {
@@ -237,21 +217,22 @@ class StateManagerAgent:
                     'completed_count': 0,
                     'answers': {}
                 }
-            
+
             brainstorming_state = st.session_state.business_state['brainstorming_progress']
             previous_count = brainstorming_state['completed_count']
-            
-            # Update the answer
-            brainstorming_state['answers'][question_index] = {
-                'question': BRAINSTORMING_QUESTIONS[question_index],
-                'category': BRAINSTORMING_CATEGORIES[question_index],
+
+            # Update the answer with dynamic question data
+            brainstorming_state['answers'][str(question_index)] = {
+                'question': question_text,
+                'category': question_category,
                 'answer': user_answer,
                 'timestamp': datetime.now().isoformat()
             }
-            
+
             if status == 'completed':
-                brainstorming_state['completed_count'] = len(brainstorming_state['answers'])
-                
+                # Increment completed count properly - it should be question_index + 1
+                brainstorming_state['completed_count'] = question_index + 1
+
                 # Set next question
                 if brainstorming_state['completed_count'] < 20:
                     brainstorming_state['current_question'] = brainstorming_state['completed_count']
@@ -414,9 +395,26 @@ RESPONSE VALIDATION RULES:
 MANDATORY TOOL WORKFLOW:
 1. If user asks question or seems confused → call provide_help tool
 2. When user answers TIC question → ALWAYS call analyze_user_response
-3. If response valid → TIC marked complete, move to next TIC  
+3. If response valid → TIC marked complete, move to next TIC
 4. If response invalid → ask clarification question
 5. When ALL 7 TICs complete → AUTOMATICALLY call generate_benchmark_companies
+
+CRITICAL: ANALYSIS_SUMMARY CREATION REQUIREMENTS:
+When calling analyze_user_response, create comprehensive analysis_summary that:
+- Captures the USER'S VISION and passion behind their business idea
+- Focuses on their unique perspective and how they see their business impacting the world
+- Includes specific details that reflect their entrepreneurial vision and motivation
+- Uses their own language and terminology where possible
+- Highlights what makes their approach unique or innovative
+- Connects to their personal values and goals
+- Creates a narrative that shows their business evolution and thinking
+- Makes the summary engaging and reflective of their actual vision, not generic business language
+
+Example GOOD analysis_summary:
+"The founder envisions democratizing healthcare access through AI, driven by personal experience with healthcare gaps in underserved communities. Their vision combines technological innovation with social impact, aiming to become the primary preventive healthcare platform globally while maintaining strict privacy standards and clinical accuracy."
+
+Example POOR analysis_summary:
+"Business provides healthcare solutions using AI technology for customers."
 
 TIC QUESTIONS TO ASK:
 1. Vision: "What do you hope to achieve with this business in 5-10 years?"
@@ -698,6 +696,145 @@ Respond with only one word: "COMPLETE" or "INCOMPLETE"
             print(f"BUSINESS CONSULTANT ERROR: {json.dumps(error_result, indent=2)}")
             return error_result
 
+    def _generate_first_question(self) -> str:
+        """Generate the first brainstorming question based on TIC context and benchmark companies"""
+        try:
+            # Get business context from TICs
+            tic_progress = st.session_state.business_state['tic_progress']
+            industry = st.session_state.business_state['industry']
+            selected_companies = st.session_state.business_state.get('selected_companies', [])
+
+            # Build context from completed TICs
+            business_context = f"Industry: {industry}\n"
+            for tic_name, tic_data in tic_progress.items():
+                if tic_data['status'] == 'confirmed' and tic_data['summary']:
+                    display_name = TIC_DISPLAY_NAMES.get(tic_name, tic_name)
+                    business_context += f"{display_name}: {tic_data['summary']}\n"
+
+            # Add benchmark companies context
+            benchmark_context = f"Selected benchmark companies: {', '.join(selected_companies)}"
+
+            question_prompt = f"""You are an expert business analyst conducting a deep-dive evaluation. Based on the business idea and benchmark companies below, generate the FIRST strategic question to begin a comprehensive 20-question evaluation.
+
+Business Context:
+{business_context}
+
+{benchmark_context}
+
+Generate the most important first question that will:
+1. Build on the existing TIC information
+2. Consider the competitive landscape from benchmark companies
+3. Focus on the 7 evaluation criteria: Vision, Market Opportunity, USP & Competitive Advantage, Value Proposition, Sustainability, or Execution Feasibility
+4. Be specific and strategic (not generic)
+5. Help evaluate investment potential
+
+Return only the question text, no numbering or formatting."""
+
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": question_prompt}],
+                temperature=0.3
+            )
+
+            return response.choices[0].message.content.strip()
+
+        except Exception as e:
+            print(f"Error generating first question: {str(e)}")
+            # Fallback to a solid first question
+            return "What specific value does this business idea aim to bring to the world, and why is now the right time to pursue this opportunity?"
+
+    def _generate_next_question(self, completed_count: int) -> str:
+        """Generate the next question based on previous answers and business context"""
+        try:
+            # Get business context
+            tic_progress = st.session_state.business_state['tic_progress']
+            industry = st.session_state.business_state['industry']
+            selected_companies = st.session_state.business_state.get('selected_companies', [])
+            brainstorming_progress = st.session_state.business_state.get('brainstorming_progress', {})
+            previous_answers = brainstorming_progress.get('answers', {})
+
+            # Build comprehensive context
+            business_context = f"Industry: {industry}\n"
+            for tic_name, tic_data in tic_progress.items():
+                if tic_data['status'] == 'confirmed' and tic_data['summary']:
+                    display_name = TIC_DISPLAY_NAMES.get(tic_name, tic_name)
+                    business_context += f"{display_name}: {tic_data['summary']}\n"
+
+            # Add previous Q&A context
+            qa_context = "\nPrevious Questions & Answers:\n"
+            for i in range(completed_count):
+                if i in previous_answers:
+                    qa_context += f"Q{i+1}: {previous_answers[i].get('question', 'Unknown')}\n"
+                    qa_context += f"A{i+1}: {previous_answers[i].get('answer', 'No answer')}\n\n"
+
+            # Determine focus area based on progress
+            focus_guidance = self._get_question_focus_guidance(completed_count)
+
+            question_prompt = f"""You are an expert business analyst conducting a deep-dive evaluation. Based on the business context, previous Q&A, and benchmark companies, generate the NEXT strategic question (Question {completed_count + 1} of 20).
+
+Business Context:
+{business_context}
+
+Selected Benchmark Companies: {', '.join(selected_companies)}
+
+{qa_context}
+
+Focus for this question: {focus_guidance}
+
+Generate a strategic question that:
+1. Builds on previous answers and identified gaps
+2. Considers the competitive landscape and benchmark companies
+3. Focuses on the 7 evaluation criteria: Vision, Market Opportunity, USP & Competitive Advantage, Value Proposition, Sustainability, or Execution Feasibility
+4. Is specific and contextual (not generic)
+5. Helps evaluate investment potential and business viability
+6. Avoids repeating topics already well-covered
+
+Return only the question text, no numbering or formatting."""
+
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": question_prompt}],
+                temperature=0.4
+            )
+
+            return response.choices[0].message.content.strip()
+
+        except Exception as e:
+            print(f"Error generating next question: {str(e)}")
+            # Fallback questions based on progress
+            fallback_questions = [
+                "How does your solution address customer pain points better than existing alternatives?",
+                "What specific market trends support the timing of this business opportunity?",
+                "What key resources and capabilities do you need to execute this vision successfully?",
+                "How will you differentiate from competitors in a sustainable way?",
+                "What assumptions about customer behavior need to be validated?",
+                "What are the biggest risks to successful implementation and how will you mitigate them?",
+                "How does this business model create long-term value for all stakeholders?",
+                "What regulatory or compliance considerations could impact your business?",
+                "How will you measure success and key performance indicators?",
+                "What partnerships or strategic alliances could accelerate your growth?"
+            ]
+
+            if completed_count < len(fallback_questions):
+                return fallback_questions[completed_count]
+            else:
+                return "What additional insights about your business model would be most valuable for potential investors?"
+
+    def _get_question_focus_guidance(self, completed_count: int) -> str:
+        """Provide focus guidance for question generation based on progress"""
+        if completed_count < 3:
+            return "Focus on Vision and core value proposition - understanding the fundamental purpose and impact"
+        elif completed_count < 7:
+            return "Focus on Market Opportunity & Growth - market size, timing, trends, and revenue model"
+        elif completed_count < 10:
+            return "Focus on USP & Competitive Advantage - differentiation, competitive landscape, and defensibility"
+        elif completed_count < 14:
+            return "Focus on Value Proposition - customer needs, solution fit, and market positioning"
+        elif completed_count < 16:
+            return "Focus on Sustainability - environmental, social, and economic long-term viability"
+        else:
+            return "Focus on Execution Feasibility - implementation challenges, resources, funding, and risks"
+
 # ===================================================================
 # EVALUATION SYSTEM
 # ===================================================================
@@ -725,52 +862,59 @@ You are an expert venture analyst with extensive experience evaluating startup p
 Return your analysis **STRICTLY** in the **following JSON format only** (no explanation or extra text):
 
 {{
+  "detailed_feedback": "<Insightful comments and qualitative evaluation from the AI reviewer. Provide comprehensive analysis highlighting key strengths, areas for improvement, and strategic recommendations.>",
   "evaluation_feedback": {{
-    "Value Proposition": {{
+    "Market Opportunity & Growth": {{
       "score": "x/5",
-      "rationale": "<Detailed analysis of the core value delivered to customers, highlighting clarity, relevance, and uniqueness>"
+      "rationale": "<How large and fast-growing is the target market? Is this the right time to enter? Include TAM/SAM/SOM analysis, growth trends, timing, and revenue model assessment.>"
     }},
     "USP & Competitive Advantage": {{
       "score": "x/5",
-      "rationale": "<In-depth assessment of how the business differentiates itself from competitors, analyzing defensive moats and sustainability of advantages>"
+      "rationale": "<What makes the idea unique? Can it stand out and stay ahead of competitors? Analyze differentiation, competitive landscape, barriers to entry, and defensibility.>"
     }},
-    "Market Opportunity & Growth": {{
+    "Value Proposition": {{
       "score": "x/5",
-      "rationale": "<Comprehensive market size analysis with TAM/SAM/SOM estimates where possible, growth trends, and future projections based on industry data>"
-    }},
-    "Execution Feasibility": {{
-      "score": "x/5",
-      "rationale": "<Detailed evaluation of implementation challenges, resource requirements, and operational complexities>"
+      "rationale": "<What problem does it solve for users—and does it excite or inspire them? Evaluate customer pain points, solution fit, and emotional appeal.>"
     }},
     "Sustainability": {{
       "score": "x/5",
-      "rationale": "<Thorough assessment of long-term viability, including financial sustainability, environmental impact, and adaptability to market changes>"
+      "rationale": "<Is the business model environmentally, socially, and economically sustainable? Assess long-term viability and impact.>"
+    }},
+    "Execution Feasibility": {{
+      "score": "x/5",
+      "rationale": "<Can the idea be built and scaled with available resources and technology? Evaluate technical requirements, team capabilities, funding needs, and implementation risks.>"
     }},
     "overall": {{
       "score": "x/25",
-      "feedback": "<Concise executive summary highlighting key strengths, critical risks, and strategic recommendations>"
+      "feedback": "<Executive summary highlighting key strengths, critical risks, and strategic recommendations>"
     }}
   }},
+  "paradigm_shift_drivers": [
+    "<Key trend 1 influencing this business (e.g., generative AI, personalization, sustainability)>",
+    "<Key trend 2 influencing this business (e.g., remote work, digital transformation)>",
+    "<Key trend 3 influencing this business (e.g., social commerce, climate change)>"
+  ],
+  "benchmark_insights": "<Analysis of selected benchmark companies: What can we learn from their strategies? How do they validate market opportunity and competitive positioning?>",
   "spider_chart_business_opportunity": {{
-    "USP and Differentiation": "x/5",
+    "Market Opportunity & Growth": "x/5",
+    "USP & Competitive Advantage": "x/5",
     "Value Proposition": "x/5",
-    "Market Fit": "x/5",
     "Sustainability": "x/5",
     "Execution Feasibility": "x/5",
     "total": "x/25"
   }},
-  "triangle_evaluation_investment_attractiveness": {{
-    "Team & Execution Capabilities": {{
-      "score": "x/5",
-      "rationale": "<Assessment of implementation potential and team capabilities based on business complexity>"
-    }},
+  "investment_attractiveness": {{
     "Market Opportunity & Growth": {{
       "score": "x/5",
-      "rationale": "<Analysis of market attractiveness, growth trajectory, and competitive landscape>"
+      "rationale": "<Analysis of market attractiveness, growth trajectory, and timing>"
     }},
     "USP & Competitive Advantage": {{
       "score": "x/5",
-      "rationale": "<Evaluation of defensibility, differentiation strength, and long-term competitive position>"
+      "rationale": "<Evaluation of uniqueness and competitive defensibility>"
+    }},
+    "Execution Feasibility": {{
+      "score": "x/5",
+      "rationale": "<Assessment of implementation potential and resource availability>"
     }},
     "total": "x/15"
   }},
@@ -879,7 +1023,12 @@ class AgentOrchestrator:
                             'answers': {}
                         }
                     
-                    first_question = BRAINSTORMING_QUESTIONS[0]
+                    # Generate first question based on TIC context and benchmark companies
+                    first_question = self.consultant._generate_first_question()
+                    # Store the question for validation and mark that first question is presented
+                    st.session_state.business_state['brainstorming_progress']['current_question_text'] = first_question
+                    st.session_state.business_state['brainstorming_progress']['first_question_presented'] = True
+                    st.session_state.business_state['brainstorming_progress']['awaiting_first_answer'] = True
                     return f"Great! Now that you've selected your benchmark companies, let's dive deep into your business idea with detailed questions.\n\n**Question 1/20:** {first_question}"
                 else:
                     # Use LLM for conversational response about company selection
@@ -907,9 +1056,10 @@ class AgentOrchestrator:
                         return "Perfect! You've completed the core brainstorming questions. You can now generate your comprehensive evaluation report from the sidebar."
                     elif 'continue' in user_choice or 'more' in user_choice or 'next' in user_choice:
                         print("USER CHOSE TO CONTINUE WITH REMAINING 10 QUESTIONS")
-                        # Continue with question 11
-                        next_question = BRAINSTORMING_QUESTIONS[10]  # Question 11 (index 10)
-                        return next_question
+                        # Generate question 11 based on context
+                        next_question = self.consultant._generate_next_question(10)
+                        st.session_state.business_state['brainstorming_progress']['current_question_text'] = next_question
+                        return f"**Question 11/20:** {next_question}"
                     else:
                         return "Please type 'end' to finish brainstorming or 'continue' to proceed with the remaining 10 questions."
                 
@@ -988,68 +1138,96 @@ Return only valid JSON, no other text."""
         except Exception as e:
             print(f"ERROR AUTO-GENERATING BENCHMARK COMPANIES: {str(e)}")
             return {"success": False, "message": str(e)}
-    
+
     def _handle_brainstorming_sequence(self, user_input: str) -> str:
-        """Handle brainstorming phase with intelligent validation and conversational ability"""
+        """Handle brainstorming phase with AI-generated adaptive questions"""
         try:
             brainstorming_state = st.session_state.business_state.get('brainstorming_progress', {})
-            current_question_index = brainstorming_state.get('current_question', 0)
-            current_question = BRAINSTORMING_QUESTIONS[current_question_index]
-            
-            print(f"BRAINSTORMING SEQUENCE START: Question {current_question_index + 1}")
-            print(f"Current Question: {current_question}")
+            completed_count = brainstorming_state.get('completed_count', 0)
+            current_question_text = brainstorming_state.get('current_question_text', '')
+
+            print(f"BRAINSTORMING SEQUENCE START: Question {completed_count + 1}")
             print(f"User input: {user_input[:100]}...")
-            
+
+            # Check if user is giving a confirmation response instead of answering the actual question
+            user_input_lower = user_input.strip().lower()
+            confirmation_phrases = ['yes', 'ok', 'sure', "let's do it", "let's go", 'start', 'begin', 'ready']
+
+            if (len(user_input.strip()) < 20 and
+                any(phrase in user_input_lower for phrase in confirmation_phrases) and
+                completed_count == 0):
+                print("DETECTED CONFIRMATION RESPONSE - NOT A REAL ANSWER")
+                return f"I can see you're ready to start! Please provide a detailed answer to the question above:\\n\\n**Question 1/20:** {current_question_text}"
+
             # Step 1: Validate if this is a meaningful answer using LLM
-            validation_result = self._validate_brainstorming_answer(user_input, current_question, current_question_index)
-            
+            validation_result = self._validate_brainstorming_answer(user_input, current_question_text, completed_count)
+
             if not validation_result['is_valid']:
                 print(f"INVALID ANSWER DETECTED: {validation_result['reason']}")
                 return validation_result['response']
-            
+
             print("ANSWER VALIDATION PASSED")
-            
-            # Step 2: Update brainstorming progress
+
+            # Step 2: Store the Q&A pair and update progress
             print("STEP 2: Updating brainstorming progress...")
+
+            # Store the current question and answer
+            if 'answers' not in brainstorming_state:
+                brainstorming_state['answers'] = {}
+
+            brainstorming_state['answers'][completed_count] = {
+                'question': current_question_text,
+                'answer': user_input
+            }
+
+            # Determine question category based on progress
+            question_category = self._get_question_category(completed_count)
+
             update_result = self.state_manager.handle_tool_call("update_brainstorming_progress", {
-                "question_index": current_question_index,
+                "question_index": completed_count,
                 "user_answer": user_input,
-                "status": "completed"
+                "status": "completed",
+                "question_text": current_question_text,
+                "question_category": question_category
             })
-            
+
             if not update_result['success']:
                 return "Please provide a more detailed answer."
-            
+
             print("STEP 2 COMPLETED: Brainstorming progress updated")
-            
+
             # Step 3: Update TICs from brainstorming (dynamic mapping)
             print("STEP 3: Updating TICs from brainstorming...")
-            self._update_tics_from_brainstorming(current_question_index, user_input)
+            self._update_tics_from_brainstorming(completed_count, user_input)
             print("STEP 3 COMPLETED: TICs updated from brainstorming")
-            
-            # Step 4: Get next question or complete
+
+            # Step 4: Check completion status and generate next question
             print("STEP 4: Getting next question...")
             updated_state = st.session_state.business_state['brainstorming_progress']
-            next_question_index = updated_state.get('current_question', 0)
-            completed_count = updated_state.get('completed_count', 0)
-            
-            print(f"Next question index: {next_question_index}")
-            print(f"Completed count: {completed_count}")
-            
+            new_completed_count = updated_state.get('completed_count', 0)
+
+            print(f"New completed count: {new_completed_count}")
+
             # Check if we just completed 10 questions - offer choice
-            if completed_count == 10:
+            if new_completed_count == 10:
                 print("STEP 4: 10 QUESTIONS COMPLETED - OFFERING CHOICE")
                 return "You've completed 10 out of 20 brainstorming questions! You can either:\n\n🚪 **End brainstorming here** and proceed to evaluation\n➡️ **Continue** with the remaining 10 questions\n\nWhat would you like to do? (Type 'end' to finish or 'continue' for more questions)"
-            
-            # Continue with remaining questions (11-20)
-            elif next_question_index < len(BRAINSTORMING_QUESTIONS):
-                next_question = BRAINSTORMING_QUESTIONS[next_question_index]
-                print(f"STEP 4 COMPLETED: Next question ready - Q{next_question_index + 1}")
-                return next_question  # Clean question format without "Thanks!" or numbering
+
+            # Continue with remaining questions (up to 20)
+            elif new_completed_count < 20:
+                print(f"STEP 4: Generating next question ({new_completed_count + 1}/20)")
+                next_question = self.consultant._generate_next_question(new_completed_count)
+
+                # Store the generated question in state for validation
+                st.session_state.business_state['brainstorming_progress']['current_question_text'] = next_question
+
+                print(f"STEP 4 COMPLETED: Next question ready - Q{new_completed_count + 1}")
+                return f"**Question {new_completed_count + 1}/20:** {next_question}"
             else:
-                print("STEP 4 COMPLETED: All questions finished")
+                print("STEP 4 COMPLETED: All 20 questions finished")
+                st.session_state.business_state['phase'] = 'evaluation_ready'
                 return "Congratulations! You've completed all 20 brainstorming questions. You can now generate your evaluation report from the sidebar."
-            
+
         except Exception as e:
             print(f"ERROR IN BRAINSTORMING SEQUENCE: {str(e)}")
             import traceback
@@ -1137,74 +1315,145 @@ Be helpful and encouraging. If user asks about terms like TAM, explain them clea
                 }
     
     def _update_tics_from_brainstorming(self, question_index: int, user_answer: str):
-        """Update TICs based on brainstorming answer using dynamic mapping"""
+        """Update TICs based on brainstorming answer using AI analysis to better reflect user's evolving vision"""
         try:
-            question_text = BRAINSTORMING_QUESTIONS[question_index]
-            
-            # Use OpenAI to dynamically determine which TIC this relates to
-            mapping_prompt = f"""Analyze this brainstorming question and user answer to determine which business component (TIC) it relates to most.
+            # Get the current question from brainstorming progress
+            current_answers = st.session_state.business_state['brainstorming_progress']['answers']
+            current_question = current_answers.get(str(question_index), {}).get('question', 'Unknown question')
 
-Question: "{question_text}"
-User Answer: "{user_answer}"
+            # Get all TIC summaries and current status for context
+            tic_context = ""
+            for tic_name in TIC_SEQUENCE:
+                tic_data = st.session_state.business_state['tic_progress'][tic_name]
+                if tic_data['summary']:
+                    display_name = TIC_QUESTIONS[tic_name]['display_name']
+                    tic_context += f"{display_name}: {tic_data['summary']}\n"
+
+            # Use OpenAI to analyze how this answer relates to and updates the user's business vision
+            analysis_prompt = f"""You are analyzing a user's brainstorming response to understand how it relates to and updates their business vision across different components.
+
+CURRENT BUSINESS CONTEXT:
+{tic_context}
+
+BRAINSTORMING QUESTION: "{current_question}"
+USER'S ANSWER: "{user_answer}"
+
+Analyze this answer and determine:
+1. Which TIC component(s) this most significantly relates to and enhances
+2. What new insights about the user's vision this reveals
+3. How this should update/enhance the existing summaries to better reflect their evolving vision
 
 Available TIC categories:
-- vision: Long-term goals, purpose, what the business aims to achieve
-- businessOverview: Core offering, what the business does, technologies needed
-- marketSize: Market size, growth trends, timing, market conditions  
-- targetCustomers: Who the customers are, customer segments
-- valueProposition: Benefits provided to customers, problems solved
-- usp: Unique advantages, differentiation, competitive advantages
-- businessModel: Revenue model, cost structure, sustainability, funding
+- vision: Long-term goals, purpose, impact the business aims to achieve
+- businessOverview: Core offering, what the business does, how it works
+- marketSize: Market opportunity, size, growth trends, timing
+- targetCustomers: Customer segments, demographics, characteristics
+- valueProposition: Customer benefits, problems solved, value delivered
+- usp: Unique advantages, differentiation, competitive positioning
+- businessModel: Revenue streams, cost structure, sustainability, funding
 
-Respond with only the TIC category name (e.g., "vision" or "marketSize")."""
+Provide your response in this JSON format:
+{
+  "primary_tic": "tic_name",
+  "secondary_tics": ["tic_name1", "tic_name2"],
+  "vision_insights": "Key insights about user's evolving vision",
+  "enhanced_summaries": {
+    "tic_name": "Enhanced summary that better reflects user's vision"
+  }
+}"""
 
             response = client.chat.completions.create(
                 model="gpt-4o-mini",
-                messages=[{"role": "user", "content": mapping_prompt}],
-                temperature=0,
-                max_tokens=20
+                messages=[{"role": "user", "content": analysis_prompt}],
+                temperature=0.2,
+                max_tokens=500
             )
-            
-            mapped_tic = response.choices[0].message.content.strip().lower()
-            
-            # Convert to proper TIC name format
-            tic_mapping = {
-                "vision": "vision",
-                "businessoverview": "businessOverview", 
-                "marketsize": "marketSize",
-                "targetcustomers": "targetCustomers",
-                "valueproposition": "valueProposition",
-                "usp": "usp",
-                "businessmodel": "businessModel"
-            }
-            
-            final_tic_name = tic_mapping.get(mapped_tic, "businessOverview")
-            
-            # Enhance the TIC summary
-            current_tic_data = st.session_state.business_state['tic_progress'][final_tic_name]
-            current_summary = current_tic_data.get('summary', 'No previous summary')
-            
-            enhancement_prompt = f"""Enhance this TIC summary with new brainstorming insights.
 
-Current Summary: {current_summary}
-New Information: {user_answer}
+            try:
+                analysis = json.loads(response.choices[0].message.content.strip())
 
-Create an enhanced summary (2-3 sentences) that incorporates the new insights."""
+                # Update primary TIC
+                primary_tic = analysis.get('primary_tic')
+                if primary_tic and primary_tic in TIC_SEQUENCE:
+                    enhanced_summaries = analysis.get('enhanced_summaries', {})
+                    if primary_tic in enhanced_summaries:
+                        current_tic_data = st.session_state.business_state['tic_progress'][primary_tic]
+                        current_tic_data['summary'] = enhanced_summaries[primary_tic]
+                        current_tic_data['enhanced_from_brainstorming'] = True
+                        current_tic_data['vision_insights'] = analysis.get('vision_insights', '')
 
-            enhancement_response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": enhancement_prompt}],
-                temperature=0.3,
-                max_tokens=150
-            )
-            
-            enhanced_summary = enhancement_response.choices[0].message.content.strip()
-            current_tic_data['summary'] = enhanced_summary
-            current_tic_data['enhanced_from_brainstorming'] = True
-            
+                # Update secondary TICs if provided
+                secondary_tics = analysis.get('secondary_tics', [])
+                enhanced_summaries = analysis.get('enhanced_summaries', {})
+                for tic_name in secondary_tics:
+                    if tic_name in TIC_SEQUENCE and tic_name in enhanced_summaries:
+                        tic_data = st.session_state.business_state['tic_progress'][tic_name]
+                        tic_data['summary'] = enhanced_summaries[tic_name]
+                        tic_data['enhanced_from_brainstorming'] = True
+
+                print(f"ENHANCED TICS FROM BRAINSTORMING: Primary={primary_tic}, Secondary={secondary_tics}")
+
+            except json.JSONDecodeError:
+                # Fallback: simple enhancement of most relevant TIC
+                self._fallback_tic_enhancement(current_question, user_answer)
+
         except Exception as e:
             print(f"ERROR UPDATING TICS FROM BRAINSTORMING: {str(e)}")
-    
+            # Fallback enhancement
+            self._fallback_tic_enhancement("Current question", user_answer)
+
+    def _fallback_tic_enhancement(self, question: str, user_answer: str):
+        """Simple fallback TIC enhancement when advanced analysis fails"""
+        try:
+            # Simple keyword-based mapping as fallback
+            answer_lower = user_answer.lower()
+
+            target_tic = "businessOverview"  # default
+            if any(word in answer_lower for word in ['vision', 'goal', 'mission', 'purpose', 'impact']):
+                target_tic = "vision"
+            elif any(word in answer_lower for word in ['market', 'size', 'growth', 'opportunity']):
+                target_tic = "marketSize"
+            elif any(word in answer_lower for word in ['customer', 'user', 'segment', 'audience']):
+                target_tic = "targetCustomers"
+            elif any(word in answer_lower for word in ['value', 'benefit', 'solve', 'problem']):
+                target_tic = "valueProposition"
+            elif any(word in answer_lower for word in ['unique', 'different', 'advantage', 'compete']):
+                target_tic = "usp"
+            elif any(word in answer_lower for word in ['revenue', 'money', 'cost', 'price', 'business model']):
+                target_tic = "businessModel"
+
+            # Simple enhancement
+            current_tic_data = st.session_state.business_state['tic_progress'][target_tic]
+            current_summary = current_tic_data.get('summary', '')
+
+            if current_summary:
+                enhanced_summary = f"{current_summary} Additional insight: {user_answer[:100]}..."
+            else:
+                enhanced_summary = f"Based on brainstorming: {user_answer[:150]}..."
+
+            current_tic_data['summary'] = enhanced_summary
+            current_tic_data['enhanced_from_brainstorming'] = True
+
+        except Exception as e:
+            print(f"FALLBACK TIC ENHANCEMENT ERROR: {str(e)}")
+
+    def _get_question_category(self, question_index: int) -> str:
+        """Determine the category of a question based on its index and focus area"""
+        focus_areas = {
+            (0, 2): "Vision & Purpose",
+            (3, 8): "Market Opportunity",
+            (9, 11): "Competitive Advantage",
+            (12, 15): "Value Proposition",
+            (16, 16): "Sustainability",
+            (17, 19): "Execution Feasibility"
+        }
+
+        for (start, end), category in focus_areas.items():
+            if start <= question_index <= end:
+                return category
+
+        return "General Business"
+
     def _handle_agent_response(self, response, conversation_id: str) -> str:
         tool_call_count = 0
         
@@ -1535,11 +1784,32 @@ with st.sidebar:
                                     'answers': {}
                                 }
                             
-                            # Add auto-start message to chat
-                            auto_message = f"Great! Now that you've selected your benchmark companies ({', '.join(st.session_state.business_state['selected_companies'])}), let's dive deep into your business idea with detailed questions."
-                            first_question = BRAINSTORMING_QUESTIONS[0]
-                            
-                            st.session_state.messages.append({"role": "assistant", "content": f"{auto_message}\n\n{first_question}"})
+                            # Generate the first question immediately
+                            try:
+                                orchestrator = st.session_state.orchestrator
+
+                                # Ensure consultant has the method
+                                if hasattr(orchestrator.consultant, '_generate_first_question'):
+                                    first_question = orchestrator.consultant._generate_first_question()
+                                else:
+                                    # Fallback question if method doesn't exist
+                                    first_question = "What specific problem does your business idea solve that existing solutions don't address effectively?"
+
+                                # Store the question in brainstorming progress
+                                st.session_state.business_state['brainstorming_progress']['current_question_text'] = first_question
+                                # Create message with the first question
+                                auto_message = f"Great! Now that you've selected your benchmark companies ({', '.join(st.session_state.business_state['selected_companies'])}), let's dive deep into your business idea with detailed questions.\n\n**Question 1/20:** {first_question}"
+
+                                st.session_state.messages.append({"role": "assistant", "content": auto_message})
+                            except Exception as e:
+                                print(f"Error generating first question: {str(e)}")
+                                # Fallback approach - just set a message without dynamic question
+                                fallback_question = "What specific problem does your business idea solve that existing solutions don't address effectively?"
+                                st.session_state.business_state['brainstorming_progress']['current_question_text'] = fallback_question
+                                auto_message = f"Great! Now that you've selected your benchmark companies ({', '.join(st.session_state.business_state['selected_companies'])}), let's dive deep into your business idea with detailed questions.\n\n**Question 1/20:** {fallback_question}"
+                                st.session_state.messages.append({"role": "assistant", "content": auto_message})
+
+                            # Question is now generated and displayed immediately
                             
                             print(f"AUTO-STARTED BRAINSTORMING WITH FIRST QUESTION")
                     
@@ -1568,17 +1838,25 @@ with st.sidebar:
             progress_percentage = completed_questions / 20
             st.progress(progress_percentage)
             
-            # Question Status
-            for i, question in enumerate(BRAINSTORMING_QUESTIONS):
-                category = BRAINSTORMING_CATEGORIES[i]
-                question_short = question[:50] + "..." if len(question) > 50 else question
-                
-                if i < completed_questions:
+            # Question Status - show dynamic questions that have been asked
+            answers = brainstorming_state.get('answers', {})
+
+            for i in range(20):  # Show up to 20 questions
+                if str(i) in answers:
+                    # Question has been asked and answered
+                    q_data = answers[str(i)]
+                    question_text = q_data.get('question', 'Dynamic question')
+                    category = q_data.get('category', 'General')
+                    question_short = question_text[:50] + "..." if len(question_text) > 50 else question_text
                     st.write(f"✅ {i+1}. [{category}] {question_short}")
-                elif i == brainstorming_state.get('current_question', 0):
-                    st.write(f"🔄 {i+1}. [{category}] {question_short} (Current)")
+                elif i == completed_questions:
+                    # This is the current question being asked
+                    st.write(f"🔄 {i+1}. [AI-Generated] Current question (dynamic)")
+                    break  # Don't show future questions since they're dynamically generated
                 else:
-                    st.write(f"⏳ {i+1}. [{category}] {question_short}")
+                    # Future questions not yet generated
+                    if i < completed_questions + 3:  # Only show a few upcoming placeholders
+                        st.write(f"⏳ {i+1}. [To be generated] AI will create this question based on your previous answers")
             
             # Exit option at 10/20
             if completed_questions >= 10 and completed_questions < 20:
@@ -1624,37 +1902,102 @@ with st.sidebar:
             # Display evaluation report if exists
             if st.session_state.business_state.get('evaluation_report'):
                 report = st.session_state.business_state['evaluation_report']
-                
-                # Overall Score
-                overall_score = report['evaluation_feedback']['overall']['score']
-                st.metric("Overall Score", overall_score)
-                
-                # Investment Recommendation
-                recommendation = report['ai_investment_recommendation']
-                rec_color = {
-                    'YES': 'green',
-                    'MAYBE': 'orange', 
-                    'NEUTRAL': 'gray',
-                    'NO': 'red'
-                }.get(recommendation, 'gray')
-                
-                st.markdown(f"**Investment Recommendation:** :{rec_color}[{recommendation}]")
-                st.write(f"**Rationale:** {report['investment_rationale']}")
-                
-                # Detailed Scores
-                with st.expander("📋 Detailed Evaluation Scores"):
-                    eval_feedback = report['evaluation_feedback']
-                    
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.write("**Value Proposition:**", eval_feedback['Value Proposition']['score'])
-                        st.write("**USP & Competitive:**", eval_feedback['USP & Competitive Advantage']['score'])
-                        st.write("**Market Opportunity:**", eval_feedback['Market Opportunity & Growth']['score'])
-                    
-                    with col2:
-                        st.write("**Execution Feasibility:**", eval_feedback['Execution Feasibility']['score'])
-                        st.write("**Sustainability:**", eval_feedback['Sustainability']['score'])
+
+                # Overall Score & Investment Recommendation (Header)
+                col1, col2 = st.columns(2)
+                with col1:
+                    overall_score = report['evaluation_feedback']['overall']['score']
+                    st.metric("Overall Score", overall_score)
+
+                with col2:
+                    recommendation = report['ai_investment_recommendation']
+                    rec_color = {
+                        'YES': 'green',
+                        'MAYBE': 'orange',
+                        'NEUTRAL': 'gray',
+                        'NO': 'red'
+                    }.get(recommendation, 'gray')
+                    st.markdown(f"**Investment Recommendation:** :{rec_color}[{recommendation}]")
+
+                st.write(f"**Investment Rationale:** {report['investment_rationale']}")
+
+                # Business Opportunity Evaluation (Top to Bottom View)
+                st.subheader("📊 Business Opportunity Evaluation")
+
+                # 1. Detailed Feedback
+                with st.expander("💬 Detailed Feedback", expanded=True):
+                    st.write(report.get('detailed_feedback', 'No detailed feedback available'))
+
+                eval_feedback = report['evaluation_feedback']
+
+                # 2. Market Opportunity & Growth
+                with st.expander("📈 Market Opportunity & Growth", expanded=True):
+                    st.metric("Score", eval_feedback['Market Opportunity & Growth']['score'])
+                    st.write(eval_feedback['Market Opportunity & Growth']['rationale'])
+
+                # 3. USP & Competitive Advantage
+                with st.expander("🏆 USP & Competitive Advantage", expanded=True):
+                    st.metric("Score", eval_feedback['USP & Competitive Advantage']['score'])
+                    st.write(eval_feedback['USP & Competitive Advantage']['rationale'])
+
+                # 4. Value Proposition
+                with st.expander("🎯 Value Proposition", expanded=True):
+                    st.metric("Score", eval_feedback['Value Proposition']['score'])
+                    st.write(eval_feedback['Value Proposition']['rationale'])
+
+                # 5. Sustainability
+                with st.expander("🌱 Sustainability", expanded=True):
+                    st.metric("Score", eval_feedback['Sustainability']['score'])
+                    st.write(eval_feedback['Sustainability']['rationale'])
+
+                # 6. Execution Feasibility
+                with st.expander("⚙️ Execution Feasibility", expanded=True):
+                    st.metric("Score", eval_feedback['Execution Feasibility']['score'])
+                    st.write(eval_feedback['Execution Feasibility']['rationale'])
+
+                # 7. Paradigm Shift Drivers
+                with st.expander("🔮 Paradigm Shift Drivers", expanded=True):
+                    if 'paradigm_shift_drivers' in report:
+                        st.write("**Key trends and societal shifts influencing this business idea:**")
+                        for i, driver in enumerate(report['paradigm_shift_drivers'], 1):
+                            st.write(f"{i}. {driver}")
+                    else:
+                        st.write("Paradigm shift analysis not available")
+
+                # 8. Benchmark Companies
+                with st.expander("🏢 Benchmark Companies", expanded=True):
+                    if 'benchmark_insights' in report:
+                        st.write("**Leading companies and case studies used for reference:**")
+                        for company in st.session_state.business_state['selected_companies']:
+                            st.write(f"• {company}")
+                        st.write("\n**Strategic Insights:**")
+                        st.write(report['benchmark_insights'])
+                    else:
+                        st.write("**Selected Benchmark Companies:**")
+                        for company in st.session_state.business_state['selected_companies']:
+                            st.write(f"• {company}")
+
+                # Investment Attractiveness Analysis
+                with st.expander("💰 Investment Attractiveness Analysis"):
+                    if 'investment_attractiveness' in report:
+                        inv_data = report['investment_attractiveness']
+
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Market Opportunity", inv_data['Market Opportunity & Growth']['score'])
+                            st.caption(inv_data['Market Opportunity & Growth']['rationale'])
+
+                        with col2:
+                            st.metric("USP & Advantage", inv_data['USP & Competitive Advantage']['score'])
+                            st.caption(inv_data['USP & Competitive Advantage']['rationale'])
+
+                        with col3:
+                            st.metric("Execution Feasibility", inv_data['Execution Feasibility']['score'])
+                            st.caption(inv_data['Execution Feasibility']['rationale'])
+
+                        st.metric("**Total Investment Score**", inv_data['total'])
+                    else:
+                        st.write("Investment attractiveness analysis not available")
 
 # Main chat interface
 if st.session_state.current_session_id is None:
